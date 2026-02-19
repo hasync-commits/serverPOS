@@ -1,29 +1,23 @@
 const express = require('express');
 const router = express.Router();
+const supplierController = require('../controllers/supplierController');
 
-const authMiddleware = require('../middlewares/authMiddleware');
-const roleMiddleware = require('../middlewares/roleMiddleware');
+// CREATE SUPPLIER
+router.post('/', supplierController.createSupplier);
 
-const {
-  createSupplier,
-  getSuppliers,
-  getSupplierById,
-  updateSupplier,
-  updateSupplierStatus,
-  getSupplierPurchases
-} = require('../controllers/supplierController');
+// GET ALL (with filters)
+router.get('/', supplierController.getSuppliers);
 
-// All routes require authentication
-router.use(authMiddleware);
+// GET BY ID
+router.get('/:id', supplierController.getSupplierById);
 
-// Read access (Admin, Manager, Cashier)
-router.get('/', getSuppliers);
-router.get('/:supplierId', getSupplierById);
-router.get('/:supplierId/purchases', getSupplierPurchases);
+// UPDATE
+router.put('/:id', supplierController.updateSupplier);
 
-// Write access (Admin, Manager)
-router.post('/', roleMiddleware('Admin', 'Manager'), createSupplier);
-router.put('/:supplierId', roleMiddleware('Admin', 'Manager'), updateSupplier);
-router.patch('/:supplierId/status', roleMiddleware('Admin', 'Manager'), updateSupplierStatus);
+// DELETE
+router.delete('/:id', supplierController.deleteSupplier);
+
+// TOGGLE ACTIVE STATUS
+router.patch('/:id/status', supplierController.toggleSupplierStatus);
 
 module.exports = router;

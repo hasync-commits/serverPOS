@@ -9,9 +9,9 @@ const sendResponse = require('../utils/response');
  */
 exports.register = async (req, res, next) => {
   try {
-    if (req.user.role !== 'Admin') {
-      return sendResponse(res, 403, false, 'Only admin can create users');
-    }
+    // if (req.user.role !== 'Admin') {
+    //   return sendResponse(res, 403, false, 'Only admin can create users');
+    // }
 
     const { name, email, password, role } = req.body;
 
