@@ -1,33 +1,62 @@
 const mongoose = require('mongoose');
 
+// PURCHASE ITEM (SNAPSHOT)
+const purchaseItemSchema = new mongoose.Schema({
+
+  productName: { type: String, required: true, trim: true },
+
+  category: { type: String, trim: true },
+
+  brand: { type: String, trim: true },
+
+  costPrice: { type: Number, required: true, min: 0 },
+
+  sellingPrice: { type: Number, required: true, min: 0 },
+
+  quantity: { type: Number, required: true, min: 1 },
+
+  itemTotal: { type: Number, required: true, min: 0}
+
+}, { _id: false });
+
+
+// PURCHASE HEADER
 const purchaseSchema = new mongoose.Schema({
-  purchaseId: { type: String, required: true, unique: true },
 
-  seq: { type: Number, required: true, unique: true, index: true },
+  purchaseCode: { type: String, required: true, unique: true },
 
-  supplier: {
+  supplierId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Supplier',
     required: true
   },
 
-  products: [{
-    product: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Product',
-      required: true
-    },
-    quantity: { type: Number, required: true, min: 1 },
-    costPrice: { type: Number, required: true, min: 0 },
-    total: { type: Number, required: true, min: 0 },
+  invoiceNumber: { type: String, trim: true },
 
-    returnable: { type: Boolean, default: true },
-    returnWindowDays: { type: Number, default: 7, min: 0 }
-  }],
+  purchaseDate: { type: Date, required: true },
 
-  totalAmount: { type: Number, required: true, min: 0 },
+  status: { type: String, enum: ['draft', 'confirmed'], default: 'draft' },
 
-  purchaseDate: { type: Date, default: Date.now }
-}, { timestamps: true });
+  items: {
+    type: [purchaseItemSchema],
+    validate: {
+      validator: function (value) {
+        return value.length > 0;
+      },
+      message: 'Purchase must contain at least one item'
+    }
+  },
+
+  subtotal: { type: Number, required: true, min: 0 },
+
+  totalDiscount: { type: Number, default: 0, min: 0 },
+
+  grandTotal: { type: Number, required: true, min: 0 },
+
+  createdBy: { type: String, required: true }
+
+}, {
+  timestamps: true
+});
 
 module.exports = mongoose.model('Purchase', purchaseSchema);

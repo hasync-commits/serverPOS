@@ -1,158 +1,326 @@
-const mongoose = require('mongoose');
 const Purchase = require('../models/purchaseModel');
 const Product = require('../models/productModel');
-const Supplier = require('../models/supplierModel');
-const sendResponse = require('../utils/response');
 
-/**
- * CREATE PURCHASE (INCREASE INVENTORY)
- */
-exports.createPurchase = async (req, res, next) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
 
+// ===============================
+// Generate Purchase Code
+// ===============================
+async function generatePurchaseCode() {
+  const count = await Purchase.countDocuments();
+  const next = count + 1;
+  return `PUR-${next.toString().padStart(4, '0')}`;
+}
+
+
+// ===============================
+// CREATE PURCHASE
+// ===============================
+exports.createPurchase = async (req, res) => {
   try {
-    const { supplier, products, purchaseDate } = req.body;
+    const {
+      supplierId,
+      invoiceNumber,
+      purchaseDate,
+      status,
+      items,
+      subtotal,
+      totalDiscount,
+      grandTotal,
+      createdBy
+    } = req.body;
 
-    if (!supplier || !products || !products.length) {
-      return sendResponse(res, 400, false, 'Supplier and products are required');
-    }
-
-    const supplierExists = await Supplier.findById(supplier);
-    if (!supplierExists) {
-      return sendResponse(res, 404, false, 'Supplier not found');
-    }
-
-    let totalAmount = 0;
-    const processedProducts = [];
-
-    for (const item of products) {
-      const { product, quantity, costPrice, returnable, returnWindowDays } = item;
-
-      if (!product || !quantity || !costPrice) {
-        await session.abortTransaction();
-        return sendResponse(res, 400, false, 'Invalid product data');
-      }
-
-      const productDoc = await Product.findById(product).session(session);
-      if (!productDoc) {
-        await session.abortTransaction();
-        return sendResponse(res, 404, false, 'Product not found');
-      }
-
-      const total = quantity * costPrice;
-      totalAmount += total;
-
-      // Increase stock
-      await Product.updateOne(
-        { _id: product },
-        { $inc: { stock: quantity } },
-        { session }
-      );
-
-      processedProducts.push({
-        product,
-        quantity,
-        costPrice,
-        total,
-        returnable: returnable ?? true,
-        returnWindowDays: returnWindowDays ?? 7
+    if (!supplierId || !invoiceNumber || !items || items.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Required fields missing'
       });
     }
 
-    const purchase = await Purchase.create([{
-      purchaseId: `PUR-${Date.now()}`,
-      seq: Date.now(), // replace with counter util later
-      supplier,
-      products: processedProducts,
-      totalAmount,
-      purchaseDate: purchaseDate || Date.now()
-    }], { session });
+    const purchaseCode = await generatePurchaseCode();
 
-    await session.commitTransaction();
+    const purchase = new Purchase({
+      purchaseCode,
+      supplierId,
+      invoiceNumber,
+      purchaseDate,
+      status: status || 'draft',
+      items,
+      subtotal,
+      totalDiscount,
+      grandTotal,
+      createdBy
+    });
 
-    sendResponse(res, 201, true, 'Purchase created successfully', purchase[0]);
+    await purchase.save();
+
+    // If directly confirmed → create products
+    if (status === 'confirmed') {
+
+      for (let item of items) {
+
+        await Product.create({
+          name: item.productName,
+          category: item.category,
+          brand: item.brand,
+          costPrice: item.costPrice,
+          sellingPrice: item.sellingPrice,
+          currentStock: item.quantity,
+          lowStockQuantity: 5,
+          supplierId,
+          purchaseId: purchase._id
+        });
+
+      }
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: 'Purchase created successfully',
+      data: purchase
+    });
 
   } catch (error) {
-    await session.abortTransaction();
-    next(error);
-  } finally {
-    session.endSession();
+
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
   }
 };
 
-/**
- * GET PURCHASES (WITH FILTERS)
- */
-exports.getPurchases = async (req, res, next) => {
+
+
+// ===============================
+// CONFIRM PURCHASE
+// ===============================
+exports.confirmPurchase = async (req, res) => {
+
   try {
-    const {
-      supplier,
-      product,
-      fromDate,
-      toDate,
-      page = 1,
-      limit = 10
-    } = req.query;
 
-    const filter = {};
+    const purchase = await Purchase.findById(req.params.id);
 
-    if (supplier) filter.supplier = supplier;
-    if (product) filter['products.product'] = product;
+    if (!purchase) {
+      return res.status(404).json({
+        success: false,
+        message: 'Purchase not found'
+      });
+    }
 
-    if (fromDate || toDate) {
-      filter.purchaseDate = {};
-      if (fromDate) filter.purchaseDate.$gte = new Date(fromDate);
-      if (toDate) filter.purchaseDate.$lte = new Date(toDate);
+    if (purchase.status === 'confirmed') {
+      return res.status(400).json({
+        success: false,
+        message: 'Purchase already confirmed'
+      });
+    }
+
+    // Create products
+    for (let item of purchase.items) {
+
+      await Product.create({
+        name: item.productName,
+        category: item.category,
+        brand: item.brand,
+        costPrice: item.costPrice,
+        sellingPrice: item.sellingPrice,
+        currentStock: item.quantity,
+        lowStockQuantity: 5,
+        supplierId: purchase.supplierId,
+        purchaseId: purchase._id
+      });
+
+    }
+
+    purchase.status = 'confirmed';
+    await purchase.save();
+
+    return res.json({
+      success: true,
+      message: 'Purchase confirmed successfully'
+    });
+
+  } catch (error) {
+
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+
+
+// ===============================
+// GET ALL PURCHASES (With Filters)
+// ===============================
+exports.getPurchases = async (req, res) => {
+
+  try {
+
+    const { status, supplierId, from, to } = req.query;
+
+    let filter = {};
+
+    if (status) filter.status = status;
+    if (supplierId) filter.supplierId = supplierId;
+
+    if (from && to) {
+      filter.purchaseDate = {
+        $gte: new Date(from),
+        $lte: new Date(to)
+      };
     }
 
     const purchases = await Purchase.find(filter)
-      .populate('supplier', 'name')
-      .populate('products.product', 'name')
-      .sort({ purchaseDate: -1 })
-      .skip((page - 1) * limit)
-      .limit(Number(limit));
+      .populate('supplierId', 'name')
+      .sort({ createdAt: -1 });
 
-    sendResponse(res, 200, true, 'Purchases fetched successfully', purchases);
+    res.json(purchases);
+
   } catch (error) {
-    next(error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch purchases'
+    });
   }
 };
 
-/**
- * GET PURCHASE BY ID
- */
-exports.getPurchaseById = async (req, res, next) => {
+
+
+// ===============================
+// GET PURCHASE BY ID
+// ===============================
+exports.getPurchaseById = async (req, res) => {
+
   try {
-    const purchase = await Purchase.findById(req.params.purchaseId)
-      .populate('supplier', 'name')
-      .populate('products.product', 'name');
+
+    const purchase = await Purchase.findById(req.params.id)
+      .populate('supplierId', 'name');
 
     if (!purchase) {
-      return sendResponse(res, 404, false, 'Purchase not found');
+      return res.status(404).json({
+        success: false,
+        message: 'Purchase not found'
+      });
     }
 
-    sendResponse(res, 200, true, 'Purchase fetched successfully', purchase);
+    res.json(purchase);
+
   } catch (error) {
-    next(error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching purchase'
+    });
   }
 };
 
-/**
- * GET PURCHASE PRODUCTS
- */
-exports.getPurchaseProducts = async (req, res, next) => {
+
+
+// ===============================
+// DELETE PURCHASE
+// ===============================
+exports.deletePurchase = async (req, res) => {
+
   try {
-    const purchase = await Purchase.findById(req.params.purchaseId)
-      .select('products')
-      .populate('products.product', 'name');
+
+    const purchase = await Purchase.findById(req.params.id);
 
     if (!purchase) {
-      return sendResponse(res, 404, false, 'Purchase not found');
+      return res.status(404).json({
+        success: false,
+        message: 'Purchase not found'
+      });
     }
 
-    sendResponse(res, 200, true, 'Purchase products fetched', purchase.products);
+    if (purchase.status === 'confirmed') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete confirmed purchase'
+      });
+    }
+
+    await purchase.deleteOne();
+
+    res.json({
+      success: true,
+      message: 'Purchase deleted successfully'
+    });
+
   } catch (error) {
-    next(error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Error deleting purchase'
+    });
+  }
+};
+
+
+exports.getPurchases = async (req, res) => {
+
+  try {
+
+    const { status, supplierId, from, to, period } = req.query;
+
+    let filter = {};
+
+    if (status) filter.status = status;
+    if (supplierId) filter.supplierId = supplierId;
+
+    // ===============================
+    // PERIOD FILTER
+    // ===============================
+    if (period) {
+
+      const now = new Date();
+      let startDate;
+
+      if (period === 'daily') {
+        startDate = new Date(now.setHours(0, 0, 0, 0));
+      }
+
+      else if (period === 'weekly') {
+        const firstDay = now.getDate() - now.getDay();
+        startDate = new Date(now.setDate(firstDay));
+        startDate.setHours(0, 0, 0, 0);
+      }
+
+      else if (period === 'monthly') {
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      }
+
+      filter.purchaseDate = {
+        $gte: startDate,
+        $lte: new Date()
+      };
+    }
+
+    // ===============================
+    // DATE RANGE FILTER
+    // ===============================
+    if (from && to) {
+
+      filter.purchaseDate = {
+        $gte: new Date(from),
+        $lte: new Date(to)
+      };
+    }
+
+    const purchases = await Purchase.find(filter)
+      .populate('supplierId', 'name')
+      .sort({ createdAt: -1 });
+
+    res.json(purchases);
+
+  } catch (error) {
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch purchases',
+      error: error.message
+    });
   }
 };
