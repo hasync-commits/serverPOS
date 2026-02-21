@@ -1,36 +1,12 @@
 const express = require('express');
 const router = express.Router();
+const saleController = require('../controllers/saleController');
 
-const authMiddleware = require('../middlewares/authMiddleware');
-const roleMiddleware = require('../middlewares/roleMiddleware');
+router.post('/newSale', saleController.createSale);
+router.put('/updateSale/:id', saleController.updateSale);
+router.delete('/deleteSale/:id', saleController.deleteSale);
 
-const {
-  createSale,
-  getSales,
-  getSaleById,
-  getSaleProducts,
-  updateSalePayment
-} = require('../controllers/saleController');
-
-router.use(authMiddleware);
-
-// Create sale (Admin, Manager, Cashier)
-router.post(
-  '/',
-  roleMiddleware('Admin', 'Manager', 'Cashier'),
-  createSale
-);
-
-// Read-only
-router.get('/', getSales);
-router.get('/:saleId', getSaleById);
-router.get('/:saleId/products', getSaleProducts);
-
-// Payment update (optional / future-ready)
-router.patch(
-  '/:saleId/payment',
-  roleMiddleware('Admin', 'Manager'),
-  updateSalePayment
-);
+router.get('/allSales', saleController.getAllSales);
+router.get('/sale/:id', saleController.getSaleById);
 
 module.exports = router;

@@ -1,34 +1,89 @@
-const mongoose = require('mongoose');
+const saleItemSchema = new mongoose.Schema({
+  productId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Product',
+    required: true
+  },
+
+  productName: { type: String, required: true },
+  category: { type: String },
+  brand: { type: String },
+
+  costPrice: { type: Number, required: true },
+  sellingPrice: { type: Number, required: true },
+
+  quantity: {
+    type: Number,
+    required: true,
+    min: 1
+  },
+
+  discount: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+
+  lineTotal: {
+    type: Number,
+    required: true
+  }
+
+}, { _id: false });
 
 const saleSchema = new mongoose.Schema({
-  
-  saleId: { type: String, required: true, unique: true },
 
-  seq: { type: Number, required: true, unique: true, index: true },
+  saleCode: {
+    type: String,
+    required: true,
+    unique: true
+  },
 
-  products: [{
-    product: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Product',
-      required: true
-    },
-    quantity: { type: Number, required: true, min: 1 },
-    unitPrice: { type: Number, required: true, min: 0 },
-    total: { type: Number, required: true, min: 0 }
-  }],
+  customerName: {
+    type: String,
+    trim: true
+  },
 
-  totalAmount: { type: Number, required: true, min: 0 },
+  items: {
+    type: [saleItemSchema],
+    required: true
+  },
 
-  customerName: { type: String },
+  subtotal: {
+    type: Number,
+    required: true
+  },
+
+  totalDiscount: {
+    type: Number,
+    required: true
+  },
+
+  grandTotal: {
+    type: Number,
+    required: true
+  },
+
+  paidAmount: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+
+  isFullyPaid: {
+    type: Boolean,
+    default: true
+  },
 
   paymentMethod: {
     type: String,
-    enum: ['Cash', 'Card', 'Mobile'],
-    default: 'Cash'
+    enum: ['Cash', 'Bank Transfer', 'Online Wallets'],
+    required: true
   },
 
-  saleDate: { type: Date, default: Date.now }
+  createdBy: {
+    type: String,
+    required: true
+  }
 
 }, { timestamps: true });
-
-module.exports = mongoose.model('Sale', saleSchema);
