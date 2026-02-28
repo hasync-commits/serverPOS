@@ -538,3 +538,94 @@ exports.getSaleById = async (req, res) => {
     });
   }
 };
+
+exports.getSales = async (req, res) => {
+
+  try {
+
+    const { status, paymentMethod, period, from, to } = req.query;
+
+    const filter = {};
+
+    // ---------------------------
+    // Status Filter
+    // ---------------------------
+    if (status === 'paid') {
+      filter.$expr = { $gte: ['$paidAmount', '$grandTotal'] };
+    }
+
+    if (status === 'partial') {
+      filter.$expr = {
+        $and: [
+          { $gt: ['$paidAmount', 0] },
+          { $lt: ['$paidAmount', '$grandTotal'] }
+        ]
+      };
+    }
+
+    if (status === 'unpaid') {
+      filter.paidAmount = 0;
+    }
+
+    // ---------------------------
+    // Payment Method
+    // ---------------------------
+    if (paymentMethod) {
+      filter.paymentMethod = paymentMethod;
+    }
+
+    // ---------------------------
+    // Period Filter
+    // ---------------------------
+    if (period) {
+
+      const now = new Date();
+      let startDate;
+
+      if (period === 'daily') {
+        startDate = new Date(now.setHours(0, 0, 0, 0));
+      }
+
+      if (period === 'weekly') {
+        startDate = new Date();
+        startDate.setDate(startDate.getDate() - 7);
+      }
+
+      if (period === 'monthly') {
+        startDate = new Date();
+        startDate.setMonth(startDate.getMonth() - 1);
+      }
+
+      if (startDate) {
+        filter.createdAt = { $gte: startDate };
+      }
+    }
+
+    // ---------------------------
+    // Date Range Filter
+    // ---------------------------
+    if (from && to) {
+      filter.createdAt = {
+        $gte: new Date(from),
+        $lte: new Date(to)
+      };
+    }
+
+    const sales = await Sale.find(filter)
+      .populate('items.productId')
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      data: sales
+    });
+
+  } catch (error) {
+
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
