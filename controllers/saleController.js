@@ -19,7 +19,8 @@ const generateSaleCode = async () => {
 };
 
 
-/* ================= CREATE SALE ================= */
+
+
 
 exports.createSale = async (req, res) => {
 
@@ -43,60 +44,49 @@ exports.createSale = async (req, res) => {
       });
     }
 
-    const session = await mongoose.startSession();
-    session.startTransaction();
+    // Validate and deduct stock
+    for (let item of items) {
 
-    try {
+      const product = await Product.findById(item.productId);
 
-      // Validate stock
-      for (let item of items) {
-
-        const product = await Product.findById(item.productId).session(session);
-
-        if (!product) {
-          throw new Error(`Product not found`);
-        }
-
-        if (product.currentStock < item.quantity) {
-          throw new Error(`Insufficient stock for ${product.name}`);
-        }
-
-        // Deduct stock
-        product.currentStock -= item.quantity;
-        await product.save({ session });
+      if (!product) {
+        return res.status(400).json({
+          success: false,
+          message: `Product not found`
+        });
       }
 
-      const saleCode = await generateSaleCode();
+      if (product.currentStock < item.quantity) {
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient stock for ${product.name}`
+        });
+      }
 
-      const sale = new Sale({
-        saleCode,
-        customerName,
-        items,
-        subtotal,
-        totalDiscount,
-        grandTotal,
-        paidAmount,
-        isFullyPaid: paidAmount >= grandTotal,
-        paymentMethod,
-        createdBy
-      });
-
-      await sale.save({ session });
-
-      await session.commitTransaction();
-      session.endSession();
-
-      return res.status(201).json({
-        success: true,
-        message: 'Sale created successfully',
-        data: sale
-      });
-
-    } catch (error) {
-      await session.abortTransaction();
-      session.endSession();
-      throw error;
+      product.currentStock -= item.quantity;
+      await product.save();
     }
+
+    const saleCode = await generateSaleCode();
+
+    const sale = await Sale.create({
+      saleCode,
+      customerName,
+      items,
+      subtotal,
+      totalDiscount,
+      grandTotal,
+      paidAmount,
+      isFullyPaid: paidAmount >= grandTotal,
+      paymentMethod,
+      createdBy
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Sale created successfully',
+      data: sale
+    });
 
   } catch (error) {
 
@@ -108,8 +98,6 @@ exports.createSale = async (req, res) => {
   }
 };
 
-
-/* ================= UPDATE SALE ================= */
 
 exports.updateSale = async (req, res) => {
 
@@ -127,53 +115,52 @@ exports.updateSale = async (req, res) => {
       });
     }
 
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
-    try {
-
-      // Restore old stock
-      for (let item of existingSale.items) {
-        const product = await Product.findById(item.productId).session(session);
+    // Restore old stock
+    for (let item of existingSale.items) {
+      const product = await Product.findById(item.productId);
+      if (product) {
         product.currentStock += item.quantity;
-        await product.save({ session });
+        await product.save();
       }
-
-      // Validate new stock and deduct
-      for (let item of updatedData.items) {
-
-        const product = await Product.findById(item.productId).session(session);
-
-        if (product.currentStock < item.quantity) {
-          throw new Error(`Insufficient stock for ${product.name}`);
-        }
-
-        product.currentStock -= item.quantity;
-        await product.save({ session });
-      }
-
-      updatedData.isFullyPaid = updatedData.paidAmount >= updatedData.grandTotal;
-
-      const updatedSale = await Sale.findByIdAndUpdate(
-        id,
-        updatedData,
-        { new: true, session }
-      );
-
-      await session.commitTransaction();
-      session.endSession();
-
-      return res.status(200).json({
-        success: true,
-        message: 'Sale updated successfully',
-        data: updatedSale
-      });
-
-    } catch (error) {
-      await session.abortTransaction();
-      session.endSession();
-      throw error;
     }
+
+    // Validate and deduct new stock
+    for (let item of updatedData.items) {
+
+      const product = await Product.findById(item.productId);
+
+      if (!product) {
+        return res.status(400).json({
+          success: false,
+          message: `Product not found`
+        });
+      }
+
+      if (product.currentStock < item.quantity) {
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient stock for ${product.name}`
+        });
+      }
+
+      product.currentStock -= item.quantity;
+      await product.save();
+    }
+
+    updatedData.isFullyPaid =
+      updatedData.paidAmount >= updatedData.grandTotal;
+
+    const updatedSale = await Sale.findByIdAndUpdate(
+      id,
+      updatedData,
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Sale updated successfully',
+      data: updatedSale
+    });
 
   } catch (error) {
 
@@ -185,8 +172,6 @@ exports.updateSale = async (req, res) => {
   }
 };
 
-
-/* ================= DELETE SALE ================= */
 
 exports.deleteSale = async (req, res) => {
 
@@ -203,33 +188,21 @@ exports.deleteSale = async (req, res) => {
       });
     }
 
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
-    try {
-
-      // Restore stock
-      for (let item of sale.items) {
-        const product = await Product.findById(item.productId).session(session);
+    // Restore stock
+    for (let item of sale.items) {
+      const product = await Product.findById(item.productId);
+      if (product) {
         product.currentStock += item.quantity;
-        await product.save({ session });
+        await product.save();
       }
-
-      await Sale.findByIdAndDelete(id, { session });
-
-      await session.commitTransaction();
-      session.endSession();
-
-      return res.status(200).json({
-        success: true,
-        message: 'Sale deleted successfully'
-      });
-
-    } catch (error) {
-      await session.abortTransaction();
-      session.endSession();
-      throw error;
     }
+
+    await Sale.findByIdAndDelete(id);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Sale deleted successfully'
+    });
 
   } catch (error) {
 
@@ -240,6 +213,271 @@ exports.deleteSale = async (req, res) => {
     });
   }
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* ================= CREATE SALE ================= */
+
+// exports.createSale = async (req, res) => {
+
+//   try {
+
+//     const {
+//       customerName,
+//       items,
+//       subtotal,
+//       totalDiscount,
+//       grandTotal,
+//       paidAmount,
+//       paymentMethod,
+//       createdBy
+//     } = req.body;
+
+//     if (!items || items.length === 0) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'Sale must contain at least one product'
+//       });
+//     }
+
+//     const session = await mongoose.startSession();
+//     session.startTransaction();
+
+//     try {
+
+//       // Validate stock
+//       for (let item of items) {
+
+//         const product = await Product.findById(item.productId).session(session);
+
+//         if (!product) {
+//           throw new Error(`Product not found`);
+//         }
+
+//         if (product.currentStock < item.quantity) {
+//           throw new Error(`Insufficient stock for ${product.name}`);
+//         }
+
+//         // Deduct stock
+//         product.currentStock -= item.quantity;
+//         await product.save({ session });
+//       }
+
+//       const saleCode = await generateSaleCode();
+
+//       const sale = new Sale({
+//         saleCode,
+//         customerName,
+//         items,
+//         subtotal,
+//         totalDiscount,
+//         grandTotal,
+//         paidAmount,
+//         isFullyPaid: paidAmount >= grandTotal,
+//         paymentMethod,
+//         createdBy
+//       });
+
+//       await sale.save({ session });
+
+//       await session.commitTransaction();
+//       session.endSession();
+
+//       return res.status(201).json({
+//         success: true,
+//         message: 'Sale created successfully',
+//         data: sale
+//       });
+
+//     } catch (error) {
+//       await session.abortTransaction();
+//       session.endSession();
+//       throw error;
+//     }
+
+//   } catch (error) {
+
+//     return res.status(500).json({
+//       success: false,
+//       message: 'Internal server error',
+//       error: error.message
+//     });
+//   }
+// };
+
+
+/* ================= UPDATE SALE ================= */
+
+// exports.updateSale = async (req, res) => {
+
+//   try {
+
+//     const { id } = req.params;
+//     const updatedData = req.body;
+
+//     const existingSale = await Sale.findById(id);
+
+//     if (!existingSale) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Sale not found'
+//       });
+//     }
+
+//     const session = await mongoose.startSession();
+//     session.startTransaction();
+
+//     try {
+
+//       // Restore old stock
+//       for (let item of existingSale.items) {
+//         const product = await Product.findById(item.productId).session(session);
+//         product.currentStock += item.quantity;
+//         await product.save({ session });
+//       }
+
+//       // Validate new stock and deduct
+//       for (let item of updatedData.items) {
+
+//         const product = await Product.findById(item.productId).session(session);
+
+//         if (product.currentStock < item.quantity) {
+//           throw new Error(`Insufficient stock for ${product.name}`);
+//         }
+
+//         product.currentStock -= item.quantity;
+//         await product.save({ session });
+//       }
+
+//       updatedData.isFullyPaid = updatedData.paidAmount >= updatedData.grandTotal;
+
+//       const updatedSale = await Sale.findByIdAndUpdate(
+//         id,
+//         updatedData,
+//         { new: true, session }
+//       );
+
+//       await session.commitTransaction();
+//       session.endSession();
+
+//       return res.status(200).json({
+//         success: true,
+//         message: 'Sale updated successfully',
+//         data: updatedSale
+//       });
+
+//     } catch (error) {
+//       await session.abortTransaction();
+//       session.endSession();
+//       throw error;
+//     }
+
+//   } catch (error) {
+
+//     return res.status(500).json({
+//       success: false,
+//       message: 'Internal server error',
+//       error: error.message
+//     });
+//   }
+// };
+
+
+/* ================= DELETE SALE ================= */
+
+// exports.deleteSale = async (req, res) => {
+
+//   try {
+
+//     const { id } = req.params;
+
+//     const sale = await Sale.findById(id);
+
+//     if (!sale) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Sale not found'
+//       });
+//     }
+
+//     const session = await mongoose.startSession();
+//     session.startTransaction();
+
+//     try {
+
+//       // Restore stock
+//       for (let item of sale.items) {
+//         const product = await Product.findById(item.productId).session(session);
+//         product.currentStock += item.quantity;
+//         await product.save({ session });
+//       }
+
+//       await Sale.findByIdAndDelete(id, { session });
+
+//       await session.commitTransaction();
+//       session.endSession();
+
+//       return res.status(200).json({
+//         success: true,
+//         message: 'Sale deleted successfully'
+//       });
+
+//     } catch (error) {
+//       await session.abortTransaction();
+//       session.endSession();
+//       throw error;
+//     }
+
+//   } catch (error) {
+
+//     return res.status(500).json({
+//       success: false,
+//       message: 'Internal server error',
+//       error: error.message
+//     });
+//   }
+// };
 
 
 /* ================= GET ALL SALES ================= */
